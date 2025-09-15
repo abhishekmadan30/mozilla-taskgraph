@@ -2,24 +2,27 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+from __future__ import annotations
+
 import os
 from textwrap import dedent
+from typing import Any
 
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.schema import Schema, optionally_keyed_by, resolve_keyed_by
-from voluptuous import Extra, Optional
 
 transforms = TransformSequence()
 
-mark_as_shipped_schema = Schema(
-    {
-        Optional("name"): str,
-        Optional("shipit-product"): optionally_keyed_by("build-type", str),
-        Extra: object,
-    }
-)
 
-transforms.add_validate(mark_as_shipped_schema)
+class MarkAsShippedSchema(Schema, kw_only=True, forbid_unknown_fields=False):
+    """Schema for mark-as-shipped tasks."""
+
+    name: str | None = None
+    shipit_product: optionally_keyed_by("build-type", str) | None = None
+    attributes: dict[str, Any] | None = None
+
+
+transforms.add_validate(MarkAsShippedSchema)
 
 
 @transforms.add

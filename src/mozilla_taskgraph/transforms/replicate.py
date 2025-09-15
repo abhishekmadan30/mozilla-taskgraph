@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import os
 import re
-from textwrap import dedent
 
 from requests.exceptions import HTTPError
 from taskgraph.transforms.base import TransformSequence
@@ -17,71 +16,58 @@ from taskgraph.util.taskcluster import (
     get_artifact,
     get_task_definition,
 )
-from voluptuous import ALLOW_EXTRA, Any, Optional, Required
 
-REPLICATE_SCHEMA = Schema(
-    {
-        Required(
-            "replicate",
-            description=dedent(
-                """
-            Configuration for the replicate transforms.
-            """.lstrip(),
-            ),
-        ): {
-            Required(
-                "target",
-                description=dedent(
-                    """
-                Define which tasks to target for replication.
 
-                Each item in the list can be either:
+class ReplicateConfig(Schema):
+    """Configuration for the replicate transforms."""
 
-                    1. A taskId
-                    2. An index path that points to a single task
+    target: list[str]
+    """
+    Define which tasks to target for replication.
 
-                If any of the resolved tasks are a Decision task, targeted
-                tasks will be derived from the `task-graph.json` artifact.
-                """.lstrip()
-                ),
-            ): [str],
-            Optional(
-                "include-attrs",
-                description=dedent(
-                    """
-                A dict of attribute key/value pairs that targeted tasks will be
-                filtered on. Targeted tasks must *match all* of the given
-                attributes or they will be ignored.
+    Each item in the list can be either:
 
-                Matching is performed by the :func:`~taskgraph.util.attrmatch`
-                utility function.
-                """.lstrip(),
-                ),
-            ): {str: Any(str, [str])},
-            Optional(
-                "exclude-attrs",
-                description=dedent(
-                    """
-                A dict of attribute key/value pairs that targeted tasks will be
-                filtered on. Targeted tasks must *not match any* of the given
-                attributes or they will be ignored.
+        1. A taskId
+        2. An index path that points to a single task
 
-                Matching is performed by the :func:`~taskgraph.util.attrmatch`
-                utility function.
-                """.lstrip(),
-                ),
-            ): {str: Any(str, [str])},
-        },
-    },
-    extra=ALLOW_EXTRA,
-)
+    If any of the resolved tasks are a Decision task, targeted
+    tasks will be derived from the `task-graph.json` artifact.
+    """
+
+    include_attrs: dict[str, str | list[str]] | None = None
+    """
+    A dict of attribute key/value pairs that targeted tasks will be
+    filtered on. Targeted tasks must *match all* of the given
+    attributes or they will be ignored.
+
+    Matching is performed by the :func:`~taskgraph.util.attrmatch`
+    utility function.
+    """
+
+    exclude_attrs: dict[str, str | list[str]] | None = None
+    """
+    A dict of attribute key/value pairs that targeted tasks will be
+    filtered on. Targeted tasks must *not match any* of the given
+    attributes or they will be ignored.
+
+    Matching is performed by the :func:`~taskgraph.util.attrmatch`
+    utility function.
+    """
+
+
+class ReplicateSchema(Schema, kw_only=True, forbid_unknown_fields=False):
+    """Schema for tasks with replicate configuration."""
+
+    replicate: ReplicateConfig
+    label: str | None = None
+
 
 TASK_ID_RE = re.compile(
     r"^[A-Za-z0-9_-]{8}[Q-T][A-Za-z0-9_-][CGKOSWaeimquy26-][A-Za-z0-9_-]{10}[AQgw]$"
 )
 
 transforms = TransformSequence()
-transforms.add_validate(REPLICATE_SCHEMA)
+transforms.add_validate(ReplicateSchema)
 
 
 @transforms.add

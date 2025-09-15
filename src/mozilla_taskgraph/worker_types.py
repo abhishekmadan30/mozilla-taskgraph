@@ -1,39 +1,40 @@
+from __future__ import annotations
+
 import binascii
 from base64 import b64decode
+from typing import Any
 
-from taskgraph.transforms.task import payload_builder, taskref_or_string
-from voluptuous import Any, Extra, Optional, Required
+from taskgraph.transforms.task import payload_builder
+from taskgraph.util.schema import Schema
 
 from mozilla_taskgraph.util.signed_artifacts import get_signed_artifacts
 
 
+class BitriseWorkerSchema(Schema, kw_only=True, forbid_unknown_fields=False):
+    """Schema for bitrise worker configuration."""
+
+    implementation: str  # Required by payload_builder
+
+    class BitriseConfig(Schema, kw_only=True, forbid_unknown_fields=False):
+        """Bitrise configuration."""
+
+        app: str
+        """Name of Bitrise App to schedule workflows on."""
+
+        workflows: list[str | dict[str, list[dict[str, Any]]]]
+        """List of workflows to trigger on specified app.
+        Can also be an object that maps workflow_ids to environment variables."""
+
+        artifact_prefix: str | None = None
+        """Directory prefix to store artifacts. Set this to 'public'
+        to create public artifacts."""
+
+    bitrise: BitriseConfig
+
+
 @payload_builder(
     "scriptworker-bitrise",
-    schema={
-        Required("bitrise"): {
-            Required(
-                "app", description="Name of Bitrise App to schedule workflows on."
-            ): str,
-            Required(
-                "workflows",
-                description="List of workflows to trigger on specified app. "
-                "Can also be an object that maps workflow_ids to environment variables.",
-            ): [
-                Any(
-                    # Workflow id - no special environment variable
-                    str,
-                    # Map of workflow id to permutations of environment variables
-                    {str: [{str: taskref_or_string}]},
-                )
-            ],
-            Optional(
-                "artifact_prefix",
-                description="Directory prefix to store artifacts. Set this to 'public' "
-                "to create public artifacts.",
-            ): str,
-        },
-        Extra: object,
-    },
+    schema=BitriseWorkerSchema,
 )
 def build_bitrise_payload(config, task, task_def):
     bitrise = task["worker"]["bitrise"]
@@ -120,11 +121,16 @@ def build_bitrise_payload(config, task, task_def):
         task_def["payload"]["artifact_prefix"] = bitrise["artifact_prefix"]
 
 
+class ShipitWorkerSchema(Schema, kw_only=True):
+    """Schema for shipit worker configuration."""
+
+    implementation: str  # Required by payload_builder
+    release_name: str
+
+
 @payload_builder(
     "scriptworker-shipit",
-    schema={
-        Required("release-name"): str,
-    },
+    schema=ShipitWorkerSchema,
 )
 def build_shipit_payload(config, task, task_def):
     worker = task["worker"]
@@ -132,27 +138,40 @@ def build_shipit_payload(config, task, task_def):
     task_def["payload"] = {"release_name": worker["release-name"]}
 
 
+class SigningWorkerSchema(Schema, kw_only=True):
+    """Schema for signing worker configuration."""
+
+    implementation: str  # Required by payload_builder
+    os: Optional[str] = None
+
+    class UpstreamArtifact(Schema, kw_only=True):
+        """Upstream artifact configuration."""
+
+        taskId: Any
+        """taskId of the task with the artifact"""
+
+        taskType: str
+        """type of signing task (for CoT)"""
+
+        paths: list[str]
+        """Paths to the artifacts to sign"""
+
+        formats: list[str]
+        """Signing formats to use on each of the paths"""
+
+        authenticode_comment: str | None = None
+        """Only For MSI, optional for the signed Installer"""
+
+    signing_type: str
+    upstream_artifacts: list[UpstreamArtifact]
+    """list of artifact URLs for the artifacts that should be signed"""
+
+    max_run_time: int | None = None
+
+
 @payload_builder(
     "scriptworker-signing",
-    schema={
-        Required("signing-type"): str,
-        # list of artifact URLs for the artifacts that should be signed
-        Required("upstream-artifacts"): [
-            {
-                # taskId of the task with the artifact
-                Required("taskId"): taskref_or_string,
-                # type of signing task (for CoT)
-                Required("taskType"): str,
-                # Paths to the artifacts to sign
-                Required("paths"): [str],
-                # Signing formats to use on each of the paths
-                Required("formats"): [str],
-                # Only For MSI, optional for the signed Installer
-                Optional("authenticode_comment"): str,
-            }
-        ],
-        Optional("max-run-time"): int,
-    },
+    schema=SigningWorkerSchema,
 )
 def build_signing_payload(config, task, task_def):
     worker = task["worker"]
@@ -188,22 +207,15 @@ def build_signing_payload(config, task, task_def):
     task["attributes"]["release_artifacts"] = sorted(list(artifacts))
 
 
-l10n_bump_info_schema = [
-    {
-        Required("name"): str,
-        Required("path"): str,
-        Required("l10n-repo-url"): str,
-        Required("l10n-repo-target-branch"): str,
-        Optional("ignore-config"): object,
-        Required("platform-configs"): [
-            {
-                Required("platforms"): [str],
-                Required("path"): str,
-                Optional("format"): str,
-            }
-        ],
-    }
-]
+class L10nBumpInfo(Schema, kw_only=True):
+    """L10n bump info configuration."""
+
+    name: str
+    path: str
+    l10n_repo_url: str
+    l10n_repo_target_branch: str
+    platform_configs: list[dict[str, Any]]
+    ignore_config: Any | None = None
 
 
 def process_l10n_bump_info(info):
@@ -221,114 +233,22 @@ def process_l10n_bump_info(info):
     return l10n_bump_info
 
 
+class LandoWorkerSchema(Schema, kw_only=True):
+    """Schema for lando worker configuration."""
+
+    implementation: str  # Required by payload_builder
+    os: str | None = None
+    lando_repo: str
+    actions: list[dict[str, Any]]
+    ignore_closed_tree: bool | None = None
+    dontbuild: bool | None = None
+    force_dry_run: bool | None = None
+    matrix_rooms: list[str] | None = None
+
+
 @payload_builder(
     "scriptworker-lando",
-    schema={
-        Required("lando-repo"): str,
-        Required("actions"): [
-            Any(
-                {
-                    Required("android-l10n-sync"): {
-                        Required("from-branch"): str,
-                        Required("toml-info"): [
-                            {
-                                Required("toml-path"): str,
-                            }
-                        ],
-                    },
-                },
-                {
-                    Required("android-l10n-import"): {
-                        Required("from-repo-url"): str,
-                        Required("toml-info"): [
-                            {
-                                Required("toml-path"): str,
-                                Required("dest-path"): str,
-                            }
-                        ],
-                    },
-                },
-                {
-                    Required("l10n-bump"): l10n_bump_info_schema,
-                },
-                {
-                    Required("tag"): {
-                        Required("types"): [Any("buildN", "release")],
-                        Required("hg-repo-url"): str,
-                    }
-                },
-                {
-                    Required("version-bump"): {
-                        Required("bump-files"): [str],
-                    },
-                },
-                # the remaining action types all end up using the "merge_day"
-                # landoscript action. however, these are quite varied tasks,
-                # and separating them out allows us to have stronger schemas.
-                {
-                    Required("esr-bump"): {
-                        Required("to-branch"): str,
-                        Required("fetch-version-from"): str,
-                        Required("version-files"): [
-                            {
-                                Required("filename"): str,
-                                Required("version-bump"): str,
-                                Optional("new-suffix"): str,
-                            },
-                        ],
-                    },
-                },
-                {
-                    Required("main-bump"): {
-                        Required("to-branch"): str,
-                        Required("fetch-version-from"): str,
-                        Required("version-files"): [
-                            {
-                                Required("filename"): str,
-                                Required("version-bump"): str,
-                                Optional("new-suffix"): str,
-                            },
-                        ],
-                        Optional("replacements"): [[str]],
-                        Optional("regex-replacements"): [[str]],
-                        Optional("end-tag"): str,
-                    },
-                },
-                {
-                    Required("early-to-late-beta"): {
-                        Required("to-branch"): str,
-                        # technically not used, but passing it keeps landoscript
-                        # code cleaner, so we may as well require a real value
-                        # for it.
-                        Required("fetch-version-from"): str,
-                        Optional("replacements"): [[str]],
-                    },
-                },
-                {
-                    Required("uplift"): {
-                        Required("fetch-version-from"): str,
-                        Required("version-files"): [
-                            {
-                                Required("filename"): str,
-                                Optional("version-bump"): str,
-                                Optional("new-suffix"): str,
-                            },
-                        ],
-                        Required("from-branch"): str,
-                        Required("to-branch"): str,
-                        Optional("replacements"): [[str]],
-                        Optional("base-tag"): str,
-                        Optional("end-tag"): str,
-                        Optional("l10n-bump-info"): l10n_bump_info_schema,
-                    },
-                },
-            )
-        ],
-        Optional("ignore-closed-tree"): bool,
-        Optional("dontbuild"): bool,
-        Optional("force-dry-run"): bool,
-        Optional("matrix-rooms"): [str],
-    },
+    schema=LandoWorkerSchema,
 )
 def build_lando_payload(config, task, task_def):
     worker = task["worker"]
@@ -472,21 +392,28 @@ def dash_to_underscore(obj):
     return new_obj
 
 
+class BeetmoverDataWorkerSchema(Schema, kw_only=True):
+    """Schema for beetmover data worker configuration."""
+
+    implementation: str  # Required by payload_builder
+
+    class DataMapEntry(Schema, kw_only=True):
+        """Data map entry configuration."""
+
+        data: str
+        content_type: str
+        destinations: list[Any]
+
+    app_name: str
+    bucket: str
+    project: str
+    data_map: list[DataMapEntry]
+    dry_run: bool | None = None
+
+
 @payload_builder(
     "scriptworker-beetmover-data",
-    schema={
-        Required("app-name"): str,
-        Required("bucket"): str,
-        Required("project"): str,
-        Required("data-map"): [
-            {
-                Required("data"): str,
-                Required("content-type"): str,
-                Required("destinations"): [taskref_or_string],
-            },
-        ],
-        Optional("dry-run"): bool,
-    },
+    schema=BeetmoverDataWorkerSchema,
 )
 def build_beetmover_data_payload(_, task, task_def):
     worker = task["worker"]

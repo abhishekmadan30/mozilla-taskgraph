@@ -9,22 +9,22 @@ release tasks.
 import os
 
 from taskgraph.transforms.base import TransformSequence
-from taskgraph.transforms.task import task_description_schema
 from taskgraph.util.schema import Schema
 from taskgraph.util.workertypes import worker_type_implementation
-from voluptuous import Extra, Optional, Required
 
 transforms = TransformSequence()
 
-release_artifacts_schema = Schema(
-    {
-        Required("worker-type"): task_description_schema["worker-type"],
-        Optional("release-artifacts"): [str],
-        Extra: object,
-    }
-)
 
-transforms.add_validate(release_artifacts_schema)
+class ReleaseArtifactsSchema(Schema, kw_only=True, forbid_unknown_fields=False):
+    """Schema for tasks with release artifacts configuration."""
+
+    label: str | None = None
+    description: str | None = None
+    worker_type: str
+    release_artifacts: list[str] | None = None
+
+
+transforms.add_validate(ReleaseArtifactsSchema)
 
 
 @transforms.add
